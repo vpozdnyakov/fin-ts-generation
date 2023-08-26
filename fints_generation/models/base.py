@@ -1,5 +1,7 @@
 import pandas as pd
 from abc import ABC, abstractmethod
+import warnings
+warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
 class Generator(ABC):
     @abstractmethod
