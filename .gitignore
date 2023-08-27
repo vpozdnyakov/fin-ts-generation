@@ -1,0 +1,5 @@
+fints_generation.egg-info/*
+.vscode/*
+**/__pycache__/**
+**/lightning_logs/*
+**/.ipynb_checkpoints/*
