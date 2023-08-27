@@ -20,6 +20,8 @@ class LSTMVAEModule(LightningModule):
     ):
         super().__init__()
         self.latent_dim = latent_dim
+        self.lr = lr
+
         self.enc = nn.LSTM(
             input_size=target_dim, 
             hidden_size=hidden_dim,
@@ -35,11 +37,10 @@ class LSTMVAEModule(LightningModule):
         self.mu = nn.Linear(hidden_dim, latent_dim)
         self.sigma = nn.Linear(hidden_dim, latent_dim)
         self.projection = nn.Linear(hidden_dim, target_dim)
-        self.lr = lr
 
     def neg_elbo(self, ts, rec_ts, sigma, mu):
         likelihood = -((rec_ts - ts)**2).sum((1,2))
-        kld = -0.5 * (1 + (sigma**2 + 1e-15).log() - mu**2 - sigma**2).sum((1,2))
+        kld = -0.5 * (1 + (sigma**2 + 1e-10).log() - mu**2 - sigma**2).sum((1,2))
         elbo = likelihood - kld
         return -elbo.mean()
 
@@ -78,32 +79,32 @@ class LSTMVAEModule(LightningModule):
 class LSTMVAE(Generator):
     def __init__(
             self, 
+            latent_dim=4,
             hidden_dim=16,
-            latent_dim=4, 
             num_layers=1,
             window_size=10, 
             batch_size=16, 
             num_epochs=1,
-            verbose=False,
             lr=0.001,
-        ):
-        self.hidden_dim = hidden_dim
+            verbose=False,
+    ):
         self.latent_dim = latent_dim
+        self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.window_size = window_size
         self.batch_size = batch_size
         self.num_epochs = num_epochs
-        self.verbose = verbose
         self.lr = lr
+        self.verbose = verbose
 
     def fit(self, data):
         super().fit(data)
         self.model = LSTMVAEModule(
-            len(self.columns), 
-            self.hidden_dim, 
-            self.num_layers,
-            self.latent_dim,
-            self.lr,
+            target_dim=len(self.columns), 
+            hidden_dim=self.hidden_dim, 
+            num_layers=self.num_layers,
+            latent_dim=self.latent_dim,
+            lr=self.lr,
         )
         self.dataset = SlidingWindowDataset(
             df=data,
