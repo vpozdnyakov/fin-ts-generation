@@ -5,7 +5,7 @@ from torch.optim import Adam, SGD
 from pytorch_lightning import LightningModule
 from torch.utils.data import DataLoader
 from pytorch_lightning import Trainer
-from pytorch_lightning.loggers import CSVLogger
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from fints_generation.models.utils import SlidingWindowDataset
 from fints_generation.models.base import Generator
@@ -125,8 +125,8 @@ class TCNGANModule(LightningModule):
         })
 
     def configure_optimizers(self):
-        generator_optimizer = SGD(self.generator.parameters(), lr=self.generator_lr)
-        discriminator_optimizer = SGD(self.discriminator.parameters(), lr=self.discriminator_lr)
+        generator_optimizer = Adam(self.generator.parameters(), lr=self.generator_lr)
+        discriminator_optimizer = Adam(self.discriminator.parameters(), lr=self.discriminator_lr)
 
         return generator_optimizer, discriminator_optimizer
 
@@ -194,7 +194,7 @@ class TCNGAN(Generator):
             accelerator='auto',
             max_epochs=self.num_epochs,
             log_every_n_steps=np.ceil(len(self.dataloader) * 0.1),
-            logger=CSVLogger('.'),
+            logger=TensorBoardLogger('.'),
         )
         self.trainer.fit(
             model=self.model, 
