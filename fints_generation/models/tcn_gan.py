@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.optim import Adam, SGD
+from torch.optim import Adam, SGD, RMSprop
 
 from pytorch_lightning import LightningModule
 from torch.utils.data import DataLoader
@@ -16,7 +16,7 @@ import numpy as np
 
 
 class _TCNGenerator(nn.Module):
-    def __init__(self, latent_size, kernel_size, hidden_size, target_size, num_layers, dropout):
+    def __init__(self, latent_size, kernel_size, hidden_size, target_size, num_layers, dropout, weight_norm):
         super().__init__()
         self.latent_size = latent_size
         self.tcn = TCNModule(
@@ -25,7 +25,7 @@ class _TCNGenerator(nn.Module):
             num_filters=hidden_size,
             num_layers=num_layers,
             dilation_base=2,
-            weight_norm=False,
+            weight_norm=weight_norm,
             target_size=hidden_size,
             dropout=dropout,
         )
@@ -38,7 +38,7 @@ class _TCNGenerator(nn.Module):
 
 
 class _TCNDiscriminator(nn.Module):
-    def __init__(self, target_size, kernel_size, hidden_size, num_layers, dropout):
+    def __init__(self, target_size, kernel_size, hidden_size, num_layers, dropout, weight_norm):
         super().__init__()
         self.tcn = TCNModule(
             input_size=target_size,
@@ -46,7 +46,7 @@ class _TCNDiscriminator(nn.Module):
             num_filters=hidden_size,
             num_layers=num_layers,
             dilation_base=2,
-            weight_norm=False,
+            weight_norm=weight_norm,
             target_size=hidden_size,
             dropout=dropout,
         )
@@ -60,7 +60,18 @@ class _TCNDiscriminator(nn.Module):
 
 class TCNGANModule(LightningModule):
     def __init__(
-        self, input_size=3, hidden_size=80, latent_size=3, num_layers=6, dropout=0, generator_lr=1e-5, discriminator_lr=1e-5, num_disc_steps=1
+        self, 
+        input_size=3, 
+        hidden_size=80, 
+        latent_size=3, 
+        num_layers=6, 
+        dropout=0, 
+        generator_lr=1e-5, 
+        discriminator_lr=1e-5, 
+        num_disc_steps=1,
+        clip_discriminator_weights=0,
+        clip_generator_weights=0,
+        weight_norm=False
     ):
         super().__init__()
         self.automatic_optimization = False
@@ -68,20 +79,24 @@ class TCNGANModule(LightningModule):
         self.discriminator_lr = discriminator_lr
         self.num_disc_steps = num_disc_steps
         self.dropout = dropout
+        self.clip_discriminator_weights = clip_discriminator_weights
+        self.clip_generator_weights = clip_generator_weights
         self.generator = _TCNGenerator(
             latent_size=latent_size,
             target_size=input_size, 
             kernel_size=2, 
             hidden_size=hidden_size, 
             num_layers=num_layers,
-            dropout=dropout
+            dropout=dropout,
+            weight_norm=weight_norm
         )
         self.discriminator = _TCNDiscriminator(
             target_size=input_size, 
             kernel_size=2, 
             hidden_size=hidden_size, 
             num_layers=num_layers,
-            dropout=dropout
+            dropout=dropout,
+            weight_norm=weight_norm
         )
 
     def _get_generator_loss(self, real_h, fake_h):
@@ -111,6 +126,9 @@ class TCNGANModule(LightningModule):
             discriminator_optimizer.zero_grad()
             self.manual_backward(discriminator_loss)
             discriminator_optimizer.step()
+            if self.clip_discriminator_weights:
+                for dp in self.discriminator.parameters():
+                    dp.data.clamp_(-self.clip_discriminator_weights, self.clip_discriminator_weights)
 
         _, real_h = self.discriminator(target)
         fake = self.generator(noise)
@@ -119,6 +137,10 @@ class TCNGANModule(LightningModule):
         generator_optimizer.zero_grad()
         self.manual_backward(generator_loss)
         generator_optimizer.step()
+        if self.clip_generator_weights:
+            for dp in self.generator.parameters():
+                dp.data.clamp_(-self.clip_generator_weights, self.clip_generator_weights)
+
         self.log_dict({
             'train_gen_loss': generator_loss, 
             'train_disc_loss': discriminator_loss
@@ -150,9 +172,12 @@ class TCNGAN(Generator):
         num_epochs=1,
         verbose=False,
         dropout=0,
+        clip_generator_weights=0,
+        clip_discriminator_weights=0,
         generator_lr=1e-5,
         discriminator_lr=1e-5,
-        num_disc_steps=1
+        num_disc_steps=1,
+        weight_norm=False
     ):
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -163,9 +188,12 @@ class TCNGAN(Generator):
         self.num_epochs = num_epochs
         self.verbose = verbose
         self.dropout = dropout
+        self.clip_generator_weights= clip_generator_weights
+        self.clip_discriminator_weights = clip_discriminator_weights
         self.generator_lr = generator_lr
         self.discriminator_lr = discriminator_lr
         self.num_disc_steps = num_disc_steps
+        self.weight_norm = weight_norm
 
     def fit(self, data):
         super().fit(data)
@@ -178,6 +206,9 @@ class TCNGAN(Generator):
             num_disc_steps=self.num_disc_steps,
             generator_lr=self.generator_lr,
             discriminator_lr=self.discriminator_lr,
+            clip_generator_weights=self.clip_generator_weights,
+            clip_discriminator_weights=self.clip_discriminator_weights,
+            weight_norm=self.weight_norm
         )
         self.dataset = SlidingWindowDataset(
             df=data,
